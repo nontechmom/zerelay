@@ -133,10 +133,17 @@ export async function POST(req: NextRequest) {
         p_user_agent: req.headers.get('user-agent') || null,
       });
 
-      // Get base URL (from environment or request)
-      const baseUrl = process.env.WEBHOOK_BASE_URL || process.env.VERCEL_URL 
-        ? `https://${process.env.VERCEL_URL}`
-        : 'https://your-domain.com';
+      // Get base URL (from environment variable)
+      // Priority: WEBHOOK_BASE_URL > VERCEL_URL > fallback
+      let baseUrl = process.env.WEBHOOK_BASE_URL;
+      
+      if (!baseUrl && process.env.VERCEL_URL) {
+        baseUrl = `https://${process.env.VERCEL_URL}`;
+      }
+      
+      if (!baseUrl) {
+        baseUrl = 'https://your-domain.com';
+      }
 
       const webhookUrl = `${baseUrl}/api/resend/webhooks/${webhookToken.token}`;
 
@@ -373,9 +380,17 @@ export async function GET(req: NextRequest) {
       console.error('Error fetching webhook token:', webhookError);
     }
 
-    const baseUrl = process.env.WEBHOOK_BASE_URL || process.env.VERCEL_URL 
-      ? `https://${process.env.VERCEL_URL}`
-      : 'https://your-domain.com';
+    // Get base URL (from environment variable)
+    // Priority: WEBHOOK_BASE_URL > VERCEL_URL > fallback
+    let baseUrl = process.env.WEBHOOK_BASE_URL;
+    
+    if (!baseUrl && process.env.VERCEL_URL) {
+      baseUrl = `https://${process.env.VERCEL_URL}`;
+    }
+    
+    if (!baseUrl) {
+      baseUrl = 'https://your-domain.com';
+    }
 
     return NextResponse.json({
       onboardingComplete: !!credential && !!webhook && webhook.is_active,
