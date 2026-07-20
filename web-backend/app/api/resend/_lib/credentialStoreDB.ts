@@ -50,14 +50,20 @@ export async function getApiKeyForUser(
   const supabase = getSupabaseServiceClient();
   const encryptionKey = getEncryptionKey();
 
-  // Get encrypted credential
-  const { data, error } = await supabase
+  // Get encrypted credential - fix query for null workspace_id
+  let query = supabase
     .from('resend_credentials')
     .select('encrypted_api_key')
     .eq('user_id', userId)
-    .eq('connection_method', 'api_key')
-    .is('workspace_id', workspaceId ?? null)
-    .maybeSingle();
+    .eq('connection_method', 'api_key');
+
+  if (workspaceId) {
+    query = query.eq('workspace_id', workspaceId);
+  } else {
+    query = query.is('workspace_id', null);
+  }
+
+  const { data, error } = await query.maybeSingle();
 
   if (error) {
     console.error('Error fetching API key:', error);
@@ -65,6 +71,7 @@ export async function getApiKeyForUser(
   }
 
   if (!data?.encrypted_api_key) {
+    console.log('No encrypted API key found for user:', userId);
     return null;
   }
 
@@ -91,12 +98,19 @@ export async function deleteApiKeyForUser(
 ): Promise<void> {
   const supabase = getSupabaseServiceClient();
 
-  const { error } = await supabase
+  let query = supabase
     .from('resend_credentials')
     .delete()
     .eq('user_id', userId)
-    .eq('connection_method', 'api_key')
-    .is('workspace_id', workspaceId ?? null);
+    .eq('connection_method', 'api_key');
+
+  if (workspaceId) {
+    query = query.eq('workspace_id', workspaceId);
+  } else {
+    query = query.is('workspace_id', null);
+  }
+
+  const { error } = await query;
 
   if (error) {
     throw new Error(`Failed to delete API key: ${error.message}`);
@@ -109,12 +123,18 @@ export async function deleteApiKeyForUser(
 export async function hasCredentials(userId: string, workspaceId?: string | null): Promise<boolean> {
   const supabase = getSupabaseServiceClient();
 
-  const { data, error } = await supabase
+  let query = supabase
     .from('resend_credentials')
     .select('id')
-    .eq('user_id', userId)
-    .is('workspace_id', workspaceId ?? null)
-    .maybeSingle();
+    .eq('user_id', userId);
+
+  if (workspaceId) {
+    query = query.eq('workspace_id', workspaceId);
+  } else {
+    query = query.is('workspace_id', null);
+  }
+
+  const { data, error } = await query.maybeSingle();
 
   return !error && !!data;
 }
@@ -128,12 +148,18 @@ export async function getCredentialMeta(
 ): Promise<{ connectionMethod: string; updatedAt: string } | null> {
   const supabase = getSupabaseServiceClient();
 
-  const { data, error } = await supabase
+  let query = supabase
     .from('resend_credentials')
     .select('connection_method, updated_at')
-    .eq('user_id', userId)
-    .is('workspace_id', workspaceId ?? null)
-    .maybeSingle();
+    .eq('user_id', userId);
+
+  if (workspaceId) {
+    query = query.eq('workspace_id', workspaceId);
+  } else {
+    query = query.is('workspace_id', null);
+  }
+
+  const { data, error } = await query.maybeSingle();
 
   if (error || !data) {
     return null;
@@ -223,14 +249,20 @@ export async function getOAuthAccessTokenForUser(
   const supabase = getSupabaseServiceClient();
   const encryptionKey = getEncryptionKey();
 
-  // Get encrypted credential
-  const { data, error } = await supabase
+  // Get encrypted credential - fix query for null workspace_id
+  let query = supabase
     .from('resend_credentials')
     .select('encrypted_access_token, token_expires_at')
     .eq('user_id', userId)
-    .eq('connection_method', 'oauth')
-    .is('workspace_id', workspaceId ?? null)
-    .maybeSingle();
+    .eq('connection_method', 'oauth');
+
+  if (workspaceId) {
+    query = query.eq('workspace_id', workspaceId);
+  } else {
+    query = query.is('workspace_id', null);
+  }
+
+  const { data, error } = await query.maybeSingle();
 
   if (error) {
     console.error('Error fetching OAuth token:', error);
@@ -270,12 +302,19 @@ export async function getOAuthAccessTokenForUser(
 export async function deleteOAuthForUser(userId: string, workspaceId?: string | null): Promise<void> {
   const supabase = getSupabaseServiceClient();
 
-  const { error } = await supabase
+  let query = supabase
     .from('resend_credentials')
     .delete()
     .eq('user_id', userId)
-    .eq('connection_method', 'oauth')
-    .is('workspace_id', workspaceId ?? null);
+    .eq('connection_method', 'oauth');
+
+  if (workspaceId) {
+    query = query.eq('workspace_id', workspaceId);
+  } else {
+    query = query.is('workspace_id', null);
+  }
+
+  const { error } = await query;
 
   if (error) {
     throw new Error(`Failed to delete OAuth credentials: ${error.message}`);
