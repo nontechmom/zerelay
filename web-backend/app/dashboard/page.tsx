@@ -48,6 +48,7 @@ export default function DashboardPage() {
           'Authorization': `Bearer ${session.access_token}`,
         },
         body: JSON.stringify({
+          from: 'onboarding@resend.dev',
           to: user?.email || 'test@example.com',
           subject: 'Test Email from ZeRelay Dashboard',
           html: `
@@ -56,6 +57,7 @@ export default function DashboardPage() {
             <p>If you're receiving this, your integration is working perfectly! 🎉</p>
             <hr>
             <p style="color: #666; font-size: 12px;">Sent at: ${new Date().toLocaleString()}</p>
+            <p style="color: #999; font-size: 11px;">Note: This email is sent from onboarding@resend.dev. After adding your verified domain in Resend, you can send from your own domain.</p>
           `,
         }),
       });
@@ -63,7 +65,7 @@ export default function DashboardPage() {
       const data = await response.json();
 
       if (response.ok) {
-        setEmailMessage(`✅ Test email sent successfully! Email ID: ${data.emailId || 'N/A'}`);
+        setEmailMessage(`✅ Test email sent successfully! Email ID: ${data.id || 'N/A'}`);
       } else {
         setEmailMessage(`❌ Failed to send: ${data.error || 'Unknown error'}`);
       }
