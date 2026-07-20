@@ -48,14 +48,27 @@ export async function getApiKeyForUser(
   workspaceId?: string | null,
 ): Promise<string | null> {
   const supabase = getSupabaseServiceClient();
-  const encryptionKey = getEncryptionKey();
+  
+  console.log('[getApiKeyForUser] Starting retrieval for userId:', userId, 'workspaceId:', workspaceId);
+  
+  let encryptionKey: string;
+  try {
+    encryptionKey = getEncryptionKey();
+    console.log('[getApiKeyForUser] Encryption key retrieved, length:', encryptionKey.length);
+  } catch (error) {
+    console.error('[getApiKeyForUser] Failed to get encryption key:', error);
+    return null;
+  }
 
   // Get encrypted credential - fix query for null workspace_id
+  // Use order + limit to handle multiple rows (from multiple onboarding attempts)
   let query = supabase
     .from('resend_credentials')
     .select('encrypted_api_key')
     .eq('user_id', userId)
-    .eq('connection_method', 'api_key');
+    .eq('connection_method', 'api_key')
+    .order('created_at', { ascending: false })
+    .limit(1);
 
   if (workspaceId) {
     query = query.eq('workspace_id', workspaceId);
@@ -63,28 +76,32 @@ export async function getApiKeyForUser(
     query = query.is('workspace_id', null);
   }
 
-  const { data, error } = await query.maybeSingle();
+  const { data, error } = await query;
 
   if (error) {
-    console.error('Error fetching API key:', error);
+    console.error('[getApiKeyForUser] Error fetching API key:', error);
     return null;
   }
 
-  if (!data?.encrypted_api_key) {
-    console.log('No encrypted API key found for user:', userId);
+  if (!data || data.length === 0 || !data[0]?.encrypted_api_key) {
+    console.log('[getApiKeyForUser] No encrypted API key found for user:', userId);
     return null;
   }
+
+  console.log('[getApiKeyForUser] Found encrypted credential, attempting decryption');
 
   // Decrypt the API key
   const { data: decryptedKey, error: decryptError } = await supabase.rpc('decrypt_credential', {
-    encrypted: data.encrypted_api_key,
+    encrypted: data[0].encrypted_api_key,
     encryption_key: encryptionKey,
   });
 
   if (decryptError) {
-    console.error('Error decrypting API key:', decryptError);
+    console.error('[getApiKeyForUser] Error decrypting API key:', decryptError);
     return null;
   }
+
+  console.log('[getApiKeyForUser] Successfully decrypted API key, starts with:', decryptedKey?.substring(0, 6));
 
   return decryptedKey;
 }
@@ -250,11 +267,14 @@ export async function getOAuthAccessTokenForUser(
   const encryptionKey = getEncryptionKey();
 
   // Get encrypted credential - fix query for null workspace_id
+  // Use order + limit to handle multiple rows
   let query = supabase
     .from('resend_credentials')
     .select('encrypted_access_token, token_expires_at')
     .eq('user_id', userId)
-    .eq('connection_method', 'oauth');
+    .eq('connection_method', 'oauth')
+    .order('created_at', { ascending: false })
+    .limit(1);
 
   if (workspaceId) {
     query = query.eq('workspace_id', workspaceId);
@@ -262,20 +282,22 @@ export async function getOAuthAccessTokenForUser(
     query = query.is('workspace_id', null);
   }
 
-  const { data, error } = await query.maybeSingle();
+  const { data, error } = await query;
 
   if (error) {
     console.error('Error fetching OAuth token:', error);
     return null;
   }
 
-  if (!data?.encrypted_access_token) {
+  if (!data || data.length === 0 || !data[0]?.encrypted_access_token) {
     return null;
   }
 
+  const credential = data[0];
+
   // Check if token is expired
-  if (data.token_expires_at) {
-    const expiresAt = new Date(data.token_expires_at);
+  if (credential.token_expires_at) {
+    const expiresAt = new Date(credential.token_expires_at);
     if (expiresAt <= new Date()) {
       console.warn('OAuth token expired');
       return null;
@@ -284,7 +306,7 @@ export async function getOAuthAccessTokenForUser(
 
   // Decrypt the access token
   const { data: decryptedToken, error: decryptError } = await supabase.rpc('decrypt_credential', {
-    encrypted: data.encrypted_access_token,
+    encrypted: credential.encrypted_access_token,
     encryption_key: encryptionKey,
   });
 
