@@ -88,7 +88,9 @@ export default function OnboardingPage() {
       }
 
       setSuccess('Integration complete!');
-      setTimeout(() => router.push('/dashboard'), 2000);
+      setTimeout(() => {
+        router.push('/dashboard');
+      }, 2000);
     } catch (err: any) {
       setError(err.message);
     } finally {

@@ -32,7 +32,9 @@ export default function DashboardPage() {
         const data = await response.json();
         setStatus(data);
 
-        if (!data.onboardingComplete) {
+        // Only redirect to onboarding if user hasn't completed it
+        // Check the database flag (onboardingCompletedAt) for reliable state
+        if (!data.onboardingCompletedAt && !data.hasApiKey) {
           router.push('/onboarding');
         }
       }

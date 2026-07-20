@@ -248,6 +248,12 @@ export async function POST(req: NextRequest) {
           p_user_agent: req.headers.get('user-agent') || null,
         });
 
+        // Mark onboarding as completed in users table
+        await supabase
+          .from('users')
+          .update({ onboarding_completed_at: new Date().toISOString() })
+          .eq('id', userId);
+
         return NextResponse.json({
           success: true,
           step: 'completed',
@@ -328,6 +334,13 @@ export async function GET(req: NextRequest) {
 
     const supabase = getSupabaseServiceClient();
 
+    // Get user onboarding status
+    const { data: userData } = await supabase
+      .from('users')
+      .select('onboarding_completed_at')
+      .eq('id', userId)
+      .single();
+
     // Check credentials
     const credQuery = supabase
       .from('resend_credentials')
@@ -369,6 +382,7 @@ export async function GET(req: NextRequest) {
       webhookUrl: webhook ? `${baseUrl}/api/resend/webhooks/${webhook.token}` : null,
       apiKeyConfiguredAt: credential?.created_at,
       webhookConfiguredAt: webhook?.created_at,
+      onboardingCompletedAt: userData?.onboarding_completed_at || null,
     });
   } catch (error) {
     console.error('Error fetching onboarding status:', error);
