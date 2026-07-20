@@ -17,35 +17,49 @@ interface WebhookLog {
 export default function WebhookLogsPage() {
   const [webhooks, setWebhooks] = useState<WebhookLog[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const router = useRouter();
   const supabase = createClient();
 
+  const fetchWebhooks = async () => {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) {
+      router.push('/login');
+      return;
+    }
+
+    console.log('[Webhooks Page] Fetching webhook logs for user:', session.user.id);
+
+    // Fetch webhook logs from audit_logs
+    const { data, error } = await supabase
+      .from('audit_logs')
+      .select('id, action, metadata, created_at')
+      .eq('user_id', session.user.id)
+      .eq('action', 'webhook.received')
+      .order('created_at', { ascending: false })
+      .limit(100);
+
+    if (error) {
+      console.error('[Webhooks Page] Error fetching webhooks:', error);
+    } else {
+      console.log('[Webhooks Page] Fetched webhooks:', data?.length || 0);
+      setWebhooks(data as WebhookLog[]);
+    }
+  };
+
   useEffect(() => {
-    const fetchWebhooks = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) {
-        router.push('/login');
-        return;
-      }
-
-      // Fetch webhook logs from audit_logs
-      const { data, error } = await supabase
-        .from('audit_logs')
-        .select('id, action, metadata, created_at')
-        .eq('user_id', session.user.id)
-        .eq('action', 'webhook.received')
-        .order('created_at', { ascending: false })
-        .limit(100);
-
-      if (!error && data) {
-        setWebhooks(data as WebhookLog[]);
-      }
-
+    const loadData = async () => {
+      await fetchWebhooks();
       setLoading(false);
     };
-
-    fetchWebhooks();
+    loadData();
   }, []);
+
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    await fetchWebhooks();
+    setRefreshing(false);
+  };
 
   const handleBack = () => {
     router.push('/dashboard');
@@ -73,6 +87,13 @@ export default function WebhookLogsPage() {
             </button>
             <h1 className="text-2xl font-bold text-gray-900">Webhook Logs</h1>
           </div>
+          <button
+            onClick={handleRefresh}
+            disabled={refreshing}
+            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400"
+          >
+            {refreshing ? '↻ Refreshing...' : '↻ Refresh'}
+          </button>
         </div>
       </header>
 
