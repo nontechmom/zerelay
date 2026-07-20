@@ -167,23 +167,36 @@ export async function POST(req: NextRequest) {
 
       try {
         // Check if signing secret already exists for this user
-        const { data: existingSecret } = await supabase
+        const query = supabase
           .from('webhook_secrets')
           .select('id')
-          .eq('user_id', userId)
-          .is('workspace_id', workspaceId)
-          .maybeSingle();
+          .eq('user_id', userId);
+        
+        if (workspaceId) {
+          query.eq('workspace_id', workspaceId);
+        } else {
+          query.is('workspace_id', null);
+        }
+
+        const { data: existingSecret } = await query.maybeSingle();
 
         if (existingSecret) {
           // Update existing secret
-          const { error: updateSecretError } = await supabase
+          const updateQuery = supabase
             .from('webhook_secrets')
             .update({
               signing_secret: webhookSigningSecret,
               updated_at: new Date().toISOString(),
             })
-            .eq('user_id', userId)
-            .is('workspace_id', workspaceId);
+            .eq('user_id', userId);
+          
+          if (workspaceId) {
+            updateQuery.eq('workspace_id', workspaceId);
+          } else {
+            updateQuery.is('workspace_id', null);
+          }
+
+          const { error: updateSecretError } = await updateQuery;
 
           if (updateSecretError) {
             console.error('Error updating webhook secret:', updateSecretError);
@@ -206,12 +219,19 @@ export async function POST(req: NextRequest) {
         }
 
         // Activate webhook token
-        const { error: activateError } = await supabase
+        const activateQuery = supabase
           .from('webhook_tokens')
           .update({ is_active: true })
           .eq('user_id', userId)
-          .is('workspace_id', workspaceId)
           .eq('is_active', false);
+        
+        if (workspaceId) {
+          activateQuery.eq('workspace_id', workspaceId);
+        } else {
+          activateQuery.is('workspace_id', null);
+        }
+
+        const { error: activateError } = await activateQuery;
 
         if (activateError) {
           console.error('Error activating webhook token:', activateError);
@@ -251,20 +271,32 @@ export async function POST(req: NextRequest) {
     // Step 3: Get onboarding status
     if (step === 'status') {
       // Check if user has credentials
-      const { data: credential } = await supabase
+      const credQuery = supabase
         .from('resend_credentials')
         .select('connection_method, created_at')
-        .eq('user_id', userId)
-        .eq('workspace_id', workspaceId || null)
-        .maybeSingle();
+        .eq('user_id', userId);
+      
+      if (workspaceId) {
+        credQuery.eq('workspace_id', workspaceId);
+      } else {
+        credQuery.is('workspace_id', null);
+      }
+
+      const { data: credential } = await credQuery.maybeSingle();
 
       // Check if user has webhook token
-      const { data: webhook } = await supabase
+      const webhookQuery = supabase
         .from('webhook_tokens')
         .select('token, is_active, created_at')
-        .eq('user_id', userId)
-        .eq('workspace_id', workspaceId || null)
-        .maybeSingle();
+        .eq('user_id', userId);
+      
+      if (workspaceId) {
+        webhookQuery.eq('workspace_id', workspaceId);
+      } else {
+        webhookQuery.is('workspace_id', null);
+      }
+
+      const { data: webhook } = await webhookQuery.maybeSingle();
 
       return NextResponse.json({
         hasApiKey: !!credential,
@@ -297,21 +329,33 @@ export async function GET(req: NextRequest) {
     const supabase = getSupabaseServiceClient();
 
     // Check credentials
-    const { data: credential } = await supabase
+    const credQuery = supabase
       .from('resend_credentials')
       .select('connection_method, created_at')
-      .eq('user_id', userId)
-      .is('workspace_id', workspaceId)
-      .maybeSingle();
+      .eq('user_id', userId);
+    
+    if (workspaceId) {
+      credQuery.eq('workspace_id', workspaceId);
+    } else {
+      credQuery.is('workspace_id', null);
+    }
+
+    const { data: credential } = await credQuery.maybeSingle();
 
     // Check webhook token
-    const { data: webhook } = await supabase
+    const webhookQuery = supabase
       .from('webhook_tokens')
       .select('token, is_active, created_at')
       .eq('user_id', userId)
-      .is('workspace_id', workspaceId)
-      .order('created_at', { ascending: false })
-      .maybeSingle();
+      .order('created_at', { ascending: false });
+    
+    if (workspaceId) {
+      webhookQuery.eq('workspace_id', workspaceId);
+    } else {
+      webhookQuery.is('workspace_id', null);
+    }
+
+    const { data: webhook } = await webhookQuery.maybeSingle();
 
     const baseUrl = process.env.WEBHOOK_BASE_URL || process.env.VERCEL_URL 
       ? `https://${process.env.VERCEL_URL}`
