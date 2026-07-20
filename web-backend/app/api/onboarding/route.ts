@@ -341,34 +341,43 @@ export async function GET(req: NextRequest) {
       .eq('id', userId)
       .single();
 
-    // Check credentials
-    const credQuery = supabase
+    // Check credentials - build query properly
+    let credQuery = supabase
       .from('resend_credentials')
       .select('connection_method, created_at')
-      .eq('user_id', userId);
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false });
     
     if (workspaceId) {
-      credQuery.eq('workspace_id', workspaceId);
+      credQuery = credQuery.eq('workspace_id', workspaceId);
     } else {
-      credQuery.is('workspace_id', null);
+      credQuery = credQuery.is('workspace_id', null);
     }
 
-    const { data: credential } = await credQuery.maybeSingle();
+    const { data: credential, error: credError } = await credQuery.maybeSingle();
+    
+    if (credError) {
+      console.error('Error fetching credentials:', credError);
+    }
 
-    // Check webhook token
-    const webhookQuery = supabase
+    // Check webhook token - build query properly
+    let webhookQuery = supabase
       .from('webhook_tokens')
       .select('token, is_active, created_at')
       .eq('user_id', userId)
       .order('created_at', { ascending: false });
     
     if (workspaceId) {
-      webhookQuery.eq('workspace_id', workspaceId);
+      webhookQuery = webhookQuery.eq('workspace_id', workspaceId);
     } else {
-      webhookQuery.is('workspace_id', null);
+      webhookQuery = webhookQuery.is('workspace_id', null);
     }
 
-    const { data: webhook } = await webhookQuery.maybeSingle();
+    const { data: webhook, error: webhookError } = await webhookQuery.maybeSingle();
+    
+    if (webhookError) {
+      console.error('Error fetching webhook token:', webhookError);
+    }
 
     const baseUrl = process.env.WEBHOOK_BASE_URL || process.env.VERCEL_URL 
       ? `https://${process.env.VERCEL_URL}`
