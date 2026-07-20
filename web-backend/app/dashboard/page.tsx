@@ -11,6 +11,23 @@ export default function DashboardPage() {
   const router = useRouter();
   const supabase = createClient();
 
+  const fetchStatus = async () => {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) return;
+
+    const response = await fetch('/api/onboarding', {
+      headers: {
+        'Authorization': `Bearer ${session.access_token}`,
+      },
+    });
+
+    if (response.ok) {
+      const data = await response.json();
+      console.log('Onboarding status fetched:', data);
+      setStatus(data);
+    }
+  };
+
   useEffect(() => {
     const fetchData = async () => {
       const { data: { session } } = await supabase.auth.getSession();
@@ -20,8 +37,8 @@ export default function DashboardPage() {
       }
 
       setUser(session.user);
-
-      // Check onboarding status
+      
+      // Fetch onboarding status
       const response = await fetch('/api/onboarding', {
         headers: {
           'Authorization': `Bearer ${session.access_token}`,
@@ -30,12 +47,13 @@ export default function DashboardPage() {
 
       if (response.ok) {
         const data = await response.json();
+        console.log('Onboarding status fetched:', data);
         setStatus(data);
 
         // Only redirect to onboarding if user hasn't completed it
-        // Check the database flag (onboardingCompletedAt) for reliable state
         if (!data.onboardingCompletedAt && !data.hasApiKey) {
           router.push('/onboarding');
+          return;
         }
       }
 
@@ -122,17 +140,32 @@ export default function DashboardPage() {
         <div className="bg-white rounded-lg shadow p-6">
           <h3 className="text-lg font-medium text-gray-900 mb-4">Quick Actions</h3>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <button className="px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors">
+            <button 
+              onClick={() => alert('Send Test Email feature coming soon!')}
+              className="px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+            >
               Send Test Email
             </button>
-            <button className="px-4 py-3 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors">
+            <button 
+              onClick={() => alert('Email History feature coming soon!')}
+              className="px-4 py-3 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors"
+            >
               View Email History
             </button>
-            <button className="px-4 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors">
+            <button 
+              onClick={() => router.push('/onboarding')}
+              className="px-4 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+            >
               Manage API Keys
             </button>
-            <button className="px-4 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors">
-              Webhook Logs
+            <button 
+              onClick={async () => {
+                await fetchStatus();
+                alert('Status refreshed!');
+              }}
+              className="px-4 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors"
+            >
+              Refresh Status
             </button>
           </div>
         </div>
