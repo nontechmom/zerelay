@@ -356,6 +356,8 @@ export async function GET(req: NextRequest) {
 
     const { data: credential, error: credError } = await credQuery.maybeSingle();
     
+    console.log('Credentials query result:', { credential, credError, userId, workspaceId });
+    
     if (credError) {
       console.error('Error fetching credentials:', credError);
     }
@@ -374,6 +376,8 @@ export async function GET(req: NextRequest) {
     }
 
     const { data: webhook, error: webhookError } = await webhookQuery.maybeSingle();
+    
+    console.log('Webhook query result:', { webhook, webhookError, userId, workspaceId });
     
     if (webhookError) {
       console.error('Error fetching webhook token:', webhookError);
