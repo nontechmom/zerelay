@@ -7,6 +7,81 @@ import { getSupabaseServiceClient } from '../../../_lib/supabase';
 const TIMESTAMP_TOLERANCE_SEC = 300;
 
 /**
+ * Fetch full email content from Resend API
+ */
+async function fetchEmailFromResend(
+  emailId: string,
+  userId: string,
+  workspaceId?: string
+): Promise<any | null> {
+  try {
+    const supabase = getSupabaseServiceClient();
+    
+    // Get user's API key
+    let query = supabase
+      .from('resend_credentials')
+      .select('encrypted_api_key')
+      .eq('user_id', userId)
+      .eq('connection_method', 'api_key')
+      .order('created_at', { ascending: false })
+      .limit(1);
+
+    if (workspaceId) {
+      query = query.eq('workspace_id', workspaceId);
+    } else {
+      query = query.is('workspace_id', null);
+    }
+
+    const { data: credData } = await query;
+    
+    if (!credData || credData.length === 0 || !credData[0]?.encrypted_api_key) {
+      console.error('[fetchEmailFromResend] No API key found for user:', userId);
+      return null;
+    }
+
+    // Decrypt API key
+    const encryptionKey = process.env.CREDENTIAL_ENCRYPTION_KEY;
+    if (!encryptionKey) {
+      console.error('[fetchEmailFromResend] No encryption key found');
+      return null;
+    }
+
+    const { data: apiKey, error: decryptError } = await supabase.rpc('decrypt_credential', {
+      encrypted: credData[0].encrypted_api_key,
+      encryption_key: encryptionKey,
+    });
+
+    if (decryptError || !apiKey) {
+      console.error('[fetchEmailFromResend] Error decrypting API key:', decryptError);
+      return null;
+    }
+
+    console.log('[fetchEmailFromResend] Fetching email from Resend API:', emailId);
+
+    // Fetch email from Resend
+    const response = await fetch(`https://api.resend.com/emails/receiving/${emailId}`, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+    });
+
+    if (!response.ok) {
+      console.error('[fetchEmailFromResend] Resend API error:', response.status, response.statusText);
+      return null;
+    }
+
+    const emailData = await response.json();
+    console.log('[fetchEmailFromResend] Successfully fetched email from Resend');
+    return emailData;
+  } catch (error) {
+    console.error('[fetchEmailFromResend] Error:', error);
+    return null;
+  }
+}
+
+/**
  * Process webhook events and store relevant data
  */
 async function processWebhookEvent(
@@ -33,19 +108,36 @@ async function processWebhookEvent(
       
       const fromEmail = eventData.from || eventData.from_email;
       const subject = eventData.subject;
-      
-      // Resend may send html/text in different fields depending on the event
-      // Check multiple possible field names
-      const htmlBody = eventData.html || eventData.html_body || eventData.body_html || null;
-      const textBody = eventData.text || eventData.text_body || eventData.body_text || eventData.body || null;
-      
       const resendEmailId = eventData.email_id || eventData.id;
-      
-      // Extract attachments if present
-      const attachments = eventData.attachments || [];
 
       console.log('[processWebhookEvent] Extracted toEmail:', toEmail);
       console.log('[processWebhookEvent] Extracted fromEmail:', fromEmail);
+      console.log('[processWebhookEvent] Resend Email ID:', resendEmailId);
+
+      // Fetch full email content from Resend API
+      let fullEmail = null;
+      if (resendEmailId) {
+        fullEmail = await fetchEmailFromResend(resendEmailId, userId, workspaceId);
+      }
+
+      // Extract body and attachments from full email or webhook data
+      let htmlBody = null;
+      let textBody = null;
+      let attachments: any[] = [];
+
+      if (fullEmail) {
+        console.log('[processWebhookEvent] Using full email data from Resend API');
+        htmlBody = fullEmail.html || fullEmail.html_body || null;
+        textBody = fullEmail.text || fullEmail.text_body || fullEmail.body || null;
+        attachments = fullEmail.attachments || [];
+      } else {
+        console.log('[processWebhookEvent] Using webhook event data (full email not available)');
+        // Fallback to webhook data
+        htmlBody = eventData.html || eventData.html_body || eventData.body_html || null;
+        textBody = eventData.text || eventData.text_body || eventData.body_text || eventData.body || null;
+        attachments = eventData.attachments || [];
+      }
+
       console.log('[processWebhookEvent] HTML body present:', !!htmlBody);
       console.log('[processWebhookEvent] Text body present:', !!textBody);
       console.log('[processWebhookEvent] Attachments count:', attachments.length);
@@ -75,23 +167,26 @@ async function processWebhookEvent(
           mailbox_id: mailbox?.id || null,
           resend_email_id: resendEmailId,
           from_email: fromEmail || 'unknown@unknown.com',
-          from_name: eventData.from_name || null,
+          from_name: eventData.from_name || fullEmail?.from_name || null,
           to_email: emailToMatch,
-          subject: subject || '(No subject)',
+          subject: subject || fullEmail?.subject || '(No subject)',
           html_body: htmlBody,
           text_body: textBody,
           event_type: eventType,
           metadata: {
-            ...eventData,
-            attachments: attachments.map((att: any) => ({
-              filename: att.filename || att.name,
-              content_type: att.content_type || att.contentType,
-              size: att.size,
-              url: att.url,
-            })),
+            webhook_data: eventData,
+            full_email: fullEmail ? {
+              attachments: attachments.map((att: any) => ({
+                filename: att.filename || att.name,
+                content_type: att.content_type || att.contentType || att.type,
+                size: att.size || 0,
+                url: att.url,
+              })),
+              headers: fullEmail.headers || {},
+            } : null,
           },
           is_read: false,
-          received_at: eventData.created_at || new Date().toISOString(),
+          received_at: eventData.created_at || fullEmail?.created_at || new Date().toISOString(),
         };
 
         console.log('[processWebhookEvent] Inserting inbox message:', {
