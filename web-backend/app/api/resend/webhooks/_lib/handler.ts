@@ -87,6 +87,7 @@ export async function handleResendWebhook(req: NextRequest, token?: string) {
   let userId: string | undefined;
   let workspaceId: string | undefined;
   let tokenId: string | undefined;
+  let userSigningSecret: string | undefined;
 
   // If token is provided, validate it
   if (token) {
@@ -97,10 +98,24 @@ export async function handleResendWebhook(req: NextRequest, token?: string) {
     userId = tokenValidation.userId;
     workspaceId = tokenValidation.workspaceId;
     tokenId = tokenValidation.tokenId;
+
+    // Look up user's signing secret
+    const supabase = getSupabaseServiceClient();
+    const { data: secretData } = await supabase
+      .from('webhook_secrets')
+      .select('signing_secret')
+      .eq('user_id', userId!)
+      .is('workspace_id', workspaceId ? workspaceId : null)
+      .maybeSingle();
+
+    if (secretData) {
+      userSigningSecret = secretData.signing_secret;
+    }
   }
 
   // Verify signature if secret is configured
-  const secret = getOptionalEnv('RESEND_WEBHOOK_SIGNING_SECRET');
+  // Prioritize user-specific secret, fall back to global secret
+  const secret = userSigningSecret || getOptionalEnv('RESEND_WEBHOOK_SIGNING_SECRET');
   if (secret) {
     const svixId = req.headers.get('svix-id') ?? '';
     const svixTimestamp = req.headers.get('svix-timestamp') ?? '';
@@ -115,8 +130,8 @@ export async function handleResendWebhook(req: NextRequest, token?: string) {
     }
   } else {
     console.warn(
-      'RESEND_WEBHOOK_SIGNING_SECRET not set — webhook payload accepted without signature verification. ' +
-        'Set this env var in production.',
+      'No webhook signing secret found (user-specific or global) — webhook payload accepted without signature verification. ' +
+        'Configure signing secret in onboarding or set RESEND_WEBHOOK_SIGNING_SECRET env var.',
     );
   }
 
