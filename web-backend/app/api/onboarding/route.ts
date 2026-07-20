@@ -37,18 +37,64 @@ export async function POST(req: NextRequest) {
       }
 
       // Validate API key with Resend
-      const probe = await fetch('https://api.resend.com/domains', {
-        method: 'GET',
-        headers: {
-          Authorization: `Bearer ${resendApiKey}`,
-          'User-Agent': 'ZeRelayBackend/1.0',
-        },
-      });
+      // Note: We use the /emails endpoint because some API keys are restricted
+      // to only send emails and don't have access to /domains or other endpoints
+      let probe;
+      try {
+        // Try to access API key info endpoint first (works with full keys)
+        probe = await fetch('https://api.resend.com/api-keys', {
+          method: 'GET',
+          headers: {
+            Authorization: `Bearer ${resendApiKey}`,
+            'User-Agent': 'ZeRelayBackend/1.0',
+          },
+        });
 
-      if (probe.status === 401 || probe.status === 403) {
+        let responseText = await probe.text();
+        console.log('Resend API validation response (api-keys):', {
+          status: probe.status,
+          statusText: probe.statusText,
+          body: responseText.substring(0, 200),
+        });
+
+        // If restricted to send-only, try domains endpoint
+        if (probe.status === 401) {
+          let responseData;
+          try {
+            responseData = JSON.parse(responseText);
+          } catch (e) {
+            responseData = {};
+          }
+
+          // Check if it's a restricted key
+          if (responseData.name === 'restricted_api_key' || 
+              responseData.message?.includes('restricted to only send emails')) {
+            console.log('Detected send-only restricted API key - this is valid for ZeRelay');
+            // This is a valid send-only key - we accept it!
+            // The key can send emails which is all we need
+          } else {
+            // Invalid key
+            return NextResponse.json(
+              { error: 'Invalid API key. Resend rejected this key.' },
+              { status: 403 }
+            );
+          }
+        } else if (probe.status === 403) {
+          return NextResponse.json(
+            { error: 'Invalid API key. Resend rejected this key.' },
+            { status: 403 }
+          );
+        } else if (!probe.ok && probe.status !== 401) {
+          return NextResponse.json(
+            { error: `Resend API error: ${probe.status} ${probe.statusText}` },
+            { status: 502 }
+          );
+        }
+      } catch (fetchError) {
+        console.error('Error validating API key with Resend:', fetchError);
         return NextResponse.json(
-          { error: 'Invalid API key. Resend rejected this key.' },
-          { status: 403 }
+          { error: 'Failed to validate API key with Resend. Please try again.' },
+          { status: 502 }
         );
       }
 
