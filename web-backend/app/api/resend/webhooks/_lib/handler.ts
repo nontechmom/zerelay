@@ -18,56 +18,104 @@ async function processWebhookEvent(
   const supabase = getSupabaseServiceClient();
 
   try {
+    console.log('[processWebhookEvent] Event type:', eventType);
+    console.log('[processWebhookEvent] Event data:', JSON.stringify(eventData, null, 2));
+
     // Handle inbound email events
     if (eventType === 'email.received' || eventType === 'email.delivered_to_inbox') {
-      const toEmail = eventData.to || eventData.to_email;
+      // Extract recipient email - handle both array and string formats
+      let toEmail = eventData.to || eventData.to_email || eventData.received_for;
+      
+      // If it's an array, take the first element
+      if (Array.isArray(toEmail)) {
+        toEmail = toEmail[0];
+      }
+      
       const fromEmail = eventData.from || eventData.from_email;
       const subject = eventData.subject;
       const htmlBody = eventData.html || eventData.html_body;
       const textBody = eventData.text || eventData.text_body;
       const resendEmailId = eventData.email_id || eventData.id;
 
+      console.log('[processWebhookEvent] Extracted toEmail:', toEmail);
+      console.log('[processWebhookEvent] Extracted fromEmail:', fromEmail);
+
       if (toEmail) {
+        const emailToMatch = String(toEmail).toLowerCase();
+        console.log('[processWebhookEvent] Looking for mailbox:', emailToMatch);
+
         // Find matching mailbox
-        const { data: mailbox } = await supabase
+        const { data: mailbox, error: mailboxError } = await supabase
           .from('mailboxes')
-          .select('id, user_id, workspace_id')
-          .eq('email_address', toEmail.toLowerCase())
+          .select('id, user_id, workspace_id, email_address')
+          .eq('email_address', emailToMatch)
           .eq('is_active', true)
           .maybeSingle();
 
+        if (mailboxError) {
+          console.error('[processWebhookEvent] Error finding mailbox:', mailboxError);
+        } else {
+          console.log('[processWebhookEvent] Found mailbox:', mailbox ? mailbox.email_address : 'none');
+        }
+
         // Store in inbox
-        await supabase.from('inbox_messages').insert({
+        const insertData = {
           user_id: mailbox?.user_id || userId,
           workspace_id: mailbox?.workspace_id || workspaceId || null,
           mailbox_id: mailbox?.id || null,
           resend_email_id: resendEmailId,
-          from_email: fromEmail,
+          from_email: fromEmail || 'unknown@unknown.com',
           from_name: eventData.from_name || null,
-          to_email: toEmail,
-          subject: subject || null,
+          to_email: emailToMatch,
+          subject: subject || '(No subject)',
           html_body: htmlBody || null,
           text_body: textBody || null,
           event_type: eventType,
           metadata: eventData,
           is_read: false,
           received_at: eventData.created_at || new Date().toISOString(),
+        };
+
+        console.log('[processWebhookEvent] Inserting inbox message:', {
+          to: insertData.to_email,
+          from: insertData.from_email,
+          subject: insertData.subject,
+          mailbox_id: insertData.mailbox_id,
         });
 
-        console.log(`Stored inbox message for ${toEmail} (mailbox: ${mailbox?.id || 'none'})`);
+        const { data: insertedMessage, error: insertError } = await supabase
+          .from('inbox_messages')
+          .insert(insertData)
+          .select()
+          .single();
+
+        if (insertError) {
+          console.error('[processWebhookEvent] Error inserting inbox message:', insertError);
+        } else {
+          console.log('[processWebhookEvent] ✅ Successfully stored inbox message with ID:', insertedMessage?.id);
+        }
+      } else {
+        console.warn('[processWebhookEvent] No recipient email found in webhook data');
       }
     }
 
     // Handle bounces and other email events
-    if (eventType.startsWith('email.')) {
-      const toEmail = eventData.to || eventData.to_email;
+    if (eventType.startsWith('email.') && (eventType === 'email.bounced' || eventType === 'email.complained')) {
+      let toEmail = eventData.to || eventData.to_email;
       
-      if (toEmail && (eventType === 'email.bounced' || eventType === 'email.complained')) {
+      // If it's an array, take the first element
+      if (Array.isArray(toEmail)) {
+        toEmail = toEmail[0];
+      }
+      
+      if (toEmail) {
+        const emailToMatch = String(toEmail).toLowerCase();
+
         // Store bounce/complaint in inbox for visibility
         const { data: mailbox } = await supabase
           .from('mailboxes')
           .select('id, user_id, workspace_id')
-          .eq('email_address', toEmail.toLowerCase())
+          .eq('email_address', emailToMatch)
           .eq('is_active', true)
           .maybeSingle();
 
@@ -78,18 +126,20 @@ async function processWebhookEvent(
           resend_email_id: eventData.email_id || eventData.id,
           from_email: 'system@zerelay.com',
           from_name: 'ZeRelay System',
-          to_email: toEmail,
+          to_email: emailToMatch,
           subject: `Email ${eventType.split('.')[1]} notification`,
-          text_body: `Your email to ${toEmail} ${eventType.split('.')[1]}. Reason: ${eventData.reason || 'Unknown'}`,
+          text_body: `Your email to ${emailToMatch} ${eventType.split('.')[1]}. Reason: ${eventData.reason || 'Unknown'}`,
           event_type: eventType,
           metadata: eventData,
           is_read: false,
           received_at: eventData.created_at || new Date().toISOString(),
         });
+
+        console.log(`[processWebhookEvent] Stored ${eventType} notification for ${emailToMatch}`);
       }
     }
   } catch (error) {
-    console.error('Error in processWebhookEvent:', error);
+    console.error('[processWebhookEvent] Uncaught error:', error);
   }
 }
 

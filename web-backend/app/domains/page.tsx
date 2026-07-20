@@ -31,6 +31,7 @@ export default function DomainsPage() {
       return;
     }
 
+    // Fetch domains from our database
     const response = await fetch('/api/domains', {
       headers: {
         'Authorization': `Bearer ${session.access_token}`,
@@ -40,9 +41,81 @@ export default function DomainsPage() {
     if (response.ok) {
       const data = await response.json();
       setDomains(data.domains);
+    } else {
+      const errorData = await response.json();
+      console.error('Error fetching domains:', errorData);
+      setMessage(`❌ Failed to fetch domains: ${errorData.error || 'Unknown error'}`);
     }
 
     setLoading(false);
+  };
+
+  const handleSyncFromResend = async () => {
+    setMessage('🔄 Syncing domains from Resend...');
+    
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return;
+
+      // Fetch domains from Resend API
+      const resendResponse = await fetch('/api/resend/domains', {
+        headers: {
+          'Authorization': `Bearer ${session.access_token}`,
+        },
+      });
+
+      if (!resendResponse.ok) {
+        setMessage('❌ Failed to fetch domains from Resend');
+        return;
+      }
+
+      const resendData = await resendResponse.json();
+      const resendDomains = resendData.data || [];
+
+      if (resendDomains.length === 0) {
+        setMessage('ℹ️ No domains found in your Resend account');
+        return;
+      }
+
+      // Sync each domain to our database
+      let syncedCount = 0;
+      for (const resendDomain of resendDomains) {
+        const domainResponse = await fetch('/api/domains', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${session.access_token}`,
+          },
+          body: JSON.stringify({
+            domain_name: resendDomain.name,
+            resend_domain_id: resendDomain.id,
+          }),
+        });
+
+        if (domainResponse.ok) {
+          syncedCount++;
+          
+          // If domain is verified in Resend, mark it as verified in our DB
+          if (resendDomain.status === 'verified') {
+            const data = await domainResponse.json();
+            await fetch(`/api/domains/${data.domain.id}`, {
+              method: 'PATCH',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${session.access_token}`,
+              },
+              body: JSON.stringify({ status: 'verified' }),
+            });
+          }
+        }
+      }
+
+      setMessage(`✅ Synced ${syncedCount} domain${syncedCount !== 1 ? 's' : ''} from Resend`);
+      fetchDomains();
+      setTimeout(() => setMessage(''), 5000);
+    } catch (error) {
+      setMessage(`❌ Error syncing: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
   };
 
   useEffect(() => {
@@ -162,25 +235,45 @@ export default function DomainsPage() {
             </button>
             <h1 className="text-2xl font-bold text-gray-900">Domain Management</h1>
           </div>
-          <button
-            onClick={() => setShowAddForm(!showAddForm)}
-            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-          >
-            + Add Domain
-          </button>
+          <div className="flex gap-2">
+            <button
+              onClick={handleSyncFromResend}
+              className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700"
+            >
+              🔄 Sync from Resend
+            </button>
+            <button
+              onClick={() => setShowAddForm(!showAddForm)}
+              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+            >
+              + Add Domain
+            </button>
+          </div>
         </div>
       </header>
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {message && (
           <div className={`mb-6 p-4 rounded-lg ${
-            message.startsWith('✅')
+            message.startsWith('✅') || message.startsWith('🔄')
               ? 'bg-green-50 border border-green-200 text-green-700'
+              : message.startsWith('ℹ️')
+              ? 'bg-blue-50 border border-blue-200 text-blue-700'
               : 'bg-red-50 border border-red-200 text-red-700'
           }`}>
             {message}
           </div>
         )}
+
+        {/* Info Box */}
+        <div className="bg-blue-50 border border-blue-200 rounded-lg p-6 mb-6">
+          <h3 className="font-semibold text-blue-900 mb-2">📌 How to add domains</h3>
+          <ol className="text-sm text-blue-800 space-y-2 list-decimal list-inside">
+            <li>First, add and verify your domain in your <a href="https://resend.com/domains" target="_blank" rel="noopener noreferrer" className="underline font-medium">Resend Dashboard</a></li>
+            <li>Then click the <strong>"🔄 Sync from Resend"</strong> button above to import your verified domains</li>
+            <li>Or manually add a domain using the <strong>"+ Add Domain"</strong> button</li>
+          </ol>
+        </div>
 
         {showAddForm && (
           <div className="bg-white rounded-lg shadow p-6 mb-6">
