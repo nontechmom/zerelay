@@ -165,57 +165,87 @@ export async function POST(req: NextRequest) {
         );
       }
 
-      // Store signing secret in user's credential metadata
-      const { error: updateError } = await supabase
-        .from('resend_credentials')
-        .update({
-          // Store in a JSON metadata field or separate table
-          // For now, we'll use the connection_method field to mark it as configured
-        })
-        .eq('user_id', userId)
-        .eq('workspace_id', workspaceId || null);
+      try {
+        // Check if signing secret already exists for this user
+        const { data: existingSecret } = await supabase
+          .from('webhook_secrets')
+          .select('id')
+          .eq('user_id', userId)
+          .is('workspace_id', workspaceId)
+          .maybeSingle();
 
-      // Activate webhook token
-      const { error: activateError } = await supabase
-        .from('webhook_tokens')
-        .update({ is_active: true })
-        .eq('user_id', userId)
-        .eq('workspace_id', workspaceId || null)
-        .eq('is_active', false);
+        if (existingSecret) {
+          // Update existing secret
+          const { error: updateSecretError } = await supabase
+            .from('webhook_secrets')
+            .update({
+              signing_secret: webhookSigningSecret,
+              updated_at: new Date().toISOString(),
+            })
+            .eq('user_id', userId)
+            .is('workspace_id', workspaceId);
 
-      if (activateError) {
-        return NextResponse.json({ error: 'Failed to activate webhook' }, { status: 500 });
+          if (updateSecretError) {
+            console.error('Error updating webhook secret:', updateSecretError);
+            return NextResponse.json({ error: 'Failed to update webhook secret' }, { status: 500 });
+          }
+        } else {
+          // Insert new secret
+          const { error: insertSecretError } = await supabase
+            .from('webhook_secrets')
+            .insert({
+              user_id: userId,
+              workspace_id: workspaceId || null,
+              signing_secret: webhookSigningSecret,
+            });
+
+          if (insertSecretError) {
+            console.error('Error inserting webhook secret:', insertSecretError);
+            return NextResponse.json({ error: 'Failed to store webhook secret' }, { status: 500 });
+          }
+        }
+
+        // Activate webhook token
+        const { error: activateError } = await supabase
+          .from('webhook_tokens')
+          .update({ is_active: true })
+          .eq('user_id', userId)
+          .is('workspace_id', workspaceId)
+          .eq('is_active', false);
+
+        if (activateError) {
+          console.error('Error activating webhook token:', activateError);
+          return NextResponse.json({ error: 'Failed to activate webhook' }, { status: 500 });
+        }
+
+        // Log audit event
+        await supabase.rpc('log_audit_event', {
+          p_user_id: userId,
+          p_workspace_id: workspaceId || null,
+          p_action: 'onboarding.completed',
+          p_resource_type: 'resend_integration',
+          p_ip_address: getClientIp(req),
+          p_user_agent: req.headers.get('user-agent') || null,
+        });
+
+        return NextResponse.json({
+          success: true,
+          step: 'completed',
+          message: 'Resend integration configured successfully!',
+          features: [
+            '✓ API key stored and encrypted',
+            '✓ Webhook URL configured',
+            '✓ Webhook signature verification enabled',
+            '✓ Ready to send and receive emails',
+          ],
+        });
+      } catch (error) {
+        console.error('Error in store_signing_secret step:', error);
+        return NextResponse.json({ 
+          error: 'Internal server error', 
+          details: error instanceof Error ? error.message : String(error)
+        }, { status: 500 });
       }
-
-      // Store signing secret (in production, store per-user or per-workspace)
-      // For now, we'll store it in a separate table
-      const { error: secretError } = await supabase.from('webhook_secrets').upsert({
-        user_id: userId,
-        workspace_id: workspaceId || null,
-        signing_secret: webhookSigningSecret,
-      });
-
-      // Log audit event
-      await supabase.rpc('log_audit_event', {
-        p_user_id: userId,
-        p_workspace_id: workspaceId || null,
-        p_action: 'onboarding.completed',
-        p_resource_type: 'resend_integration',
-        p_ip_address: getClientIp(req),
-        p_user_agent: req.headers.get('user-agent') || null,
-      });
-
-      return NextResponse.json({
-        success: true,
-        step: 'completed',
-        message: 'Resend integration configured successfully!',
-        features: [
-          '✓ API key stored and encrypted',
-          '✓ Webhook URL configured',
-          '✓ Webhook signature verification enabled',
-          '✓ Ready to send and receive emails',
-        ],
-      });
     }
 
     // Step 3: Get onboarding status
