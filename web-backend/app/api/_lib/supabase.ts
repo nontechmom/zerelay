@@ -16,6 +16,9 @@ export function getSupabaseServiceClient(): SupabaseClient {
         autoRefreshToken: false,
         persistSession: false,
       },
+      db: {
+        schema: 'public',
+      },
     });
   }
 

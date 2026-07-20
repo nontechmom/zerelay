@@ -341,43 +341,33 @@ export async function GET(req: NextRequest) {
       .eq('id', userId)
       .single();
 
-    // Check credentials - build query properly
-    let credQuery = supabase
+    // Check credentials - simplified query
+    const { data: credential, error: credError } = await supabase
       .from('resend_credentials')
       .select('connection_method, created_at')
       .eq('user_id', userId)
-      .order('created_at', { ascending: false });
+      .is('workspace_id', null)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
     
-    if (workspaceId) {
-      credQuery = credQuery.eq('workspace_id', workspaceId);
-    } else {
-      credQuery = credQuery.is('workspace_id', null);
-    }
-
-    const { data: credential, error: credError } = await credQuery.maybeSingle();
-    
-    console.log('Credentials query result:', { credential, credError, userId, workspaceId });
+    console.log('Credentials query result:', { credential, credError, userId });
     
     if (credError) {
       console.error('Error fetching credentials:', credError);
     }
 
-    // Check webhook token - build query properly
-    let webhookQuery = supabase
+    // Check webhook token - simplified query
+    const { data: webhook, error: webhookError } = await supabase
       .from('webhook_tokens')
       .select('token, is_active, created_at')
       .eq('user_id', userId)
-      .order('created_at', { ascending: false });
+      .is('workspace_id', null)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
     
-    if (workspaceId) {
-      webhookQuery = webhookQuery.eq('workspace_id', workspaceId);
-    } else {
-      webhookQuery = webhookQuery.is('workspace_id', null);
-    }
-
-    const { data: webhook, error: webhookError } = await webhookQuery.maybeSingle();
-    
-    console.log('Webhook query result:', { webhook, webhookError, userId, workspaceId });
+    console.log('Webhook query result:', { webhook, webhookError, userId });
     
     if (webhookError) {
       console.error('Error fetching webhook token:', webhookError);
