@@ -33,12 +33,22 @@ async function processWebhookEvent(
       
       const fromEmail = eventData.from || eventData.from_email;
       const subject = eventData.subject;
-      const htmlBody = eventData.html || eventData.html_body;
-      const textBody = eventData.text || eventData.text_body;
+      
+      // Resend may send html/text in different fields depending on the event
+      // Check multiple possible field names
+      const htmlBody = eventData.html || eventData.html_body || eventData.body_html || null;
+      const textBody = eventData.text || eventData.text_body || eventData.body_text || eventData.body || null;
+      
       const resendEmailId = eventData.email_id || eventData.id;
+      
+      // Extract attachments if present
+      const attachments = eventData.attachments || [];
 
       console.log('[processWebhookEvent] Extracted toEmail:', toEmail);
       console.log('[processWebhookEvent] Extracted fromEmail:', fromEmail);
+      console.log('[processWebhookEvent] HTML body present:', !!htmlBody);
+      console.log('[processWebhookEvent] Text body present:', !!textBody);
+      console.log('[processWebhookEvent] Attachments count:', attachments.length);
 
       if (toEmail) {
         const emailToMatch = String(toEmail).toLowerCase();
@@ -58,7 +68,7 @@ async function processWebhookEvent(
           console.log('[processWebhookEvent] Found mailbox:', mailbox ? mailbox.email_address : 'none');
         }
 
-        // Store in inbox
+        // Store in inbox with attachments in metadata
         const insertData = {
           user_id: mailbox?.user_id || userId,
           workspace_id: mailbox?.workspace_id || workspaceId || null,
@@ -68,10 +78,18 @@ async function processWebhookEvent(
           from_name: eventData.from_name || null,
           to_email: emailToMatch,
           subject: subject || '(No subject)',
-          html_body: htmlBody || null,
-          text_body: textBody || null,
+          html_body: htmlBody,
+          text_body: textBody,
           event_type: eventType,
-          metadata: eventData,
+          metadata: {
+            ...eventData,
+            attachments: attachments.map((att: any) => ({
+              filename: att.filename || att.name,
+              content_type: att.content_type || att.contentType,
+              size: att.size,
+              url: att.url,
+            })),
+          },
           is_read: false,
           received_at: eventData.created_at || new Date().toISOString(),
         };
@@ -81,6 +99,9 @@ async function processWebhookEvent(
           from: insertData.from_email,
           subject: insertData.subject,
           mailbox_id: insertData.mailbox_id,
+          has_html: !!insertData.html_body,
+          has_text: !!insertData.text_body,
+          attachments_count: attachments.length,
         });
 
         const { data: insertedMessage, error: insertError } = await supabase

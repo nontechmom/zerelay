@@ -15,6 +15,14 @@ interface InboxMessage {
   event_type: string;
   is_read: boolean;
   received_at: string;
+  metadata: {
+    attachments?: Array<{
+      filename: string;
+      content_type: string;
+      size: number;
+      url?: string;
+    }>;
+  };
   mailbox: {
     id: string;
     email_address: string;
@@ -31,6 +39,14 @@ function InboxContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const supabase = createClient();
+
+  const formatFileSize = (bytes: number): string => {
+    if (bytes === 0) return '0 Bytes';
+    const k = 1024;
+    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i];
+  };
 
   const fetchMessages = async () => {
     const { data: { session } } = await supabase.auth.getSession();
@@ -62,6 +78,50 @@ function InboxContent() {
 
   useEffect(() => {
     fetchMessages();
+
+    // Set up realtime subscription for new inbox messages
+    const setupRealtimeSubscription = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return;
+
+      const channel = supabase
+        .channel('inbox-messages')
+        .on(
+          'postgres_changes',
+          {
+            event: 'INSERT',
+            schema: 'public',
+            table: 'inbox_messages',
+            filter: `user_id=eq.${session.user.id}`,
+          },
+          (payload) => {
+            console.log('[Inbox Realtime] New message received:', payload.new);
+            // Refresh messages when new one arrives
+            fetchMessages();
+          }
+        )
+        .on(
+          'postgres_changes',
+          {
+            event: 'UPDATE',
+            schema: 'public',
+            table: 'inbox_messages',
+            filter: `user_id=eq.${session.user.id}`,
+          },
+          (payload) => {
+            console.log('[Inbox Realtime] Message updated:', payload.new);
+            // Refresh messages when one is updated (e.g., marked as read)
+            fetchMessages();
+          }
+        )
+        .subscribe();
+
+      return () => {
+        supabase.removeChannel(channel);
+      };
+    };
+
+    setupRealtimeSubscription();
   }, [filter]);
 
   const handleMarkAsRead = async (messageId: string, currentReadState: boolean) => {
@@ -296,6 +356,45 @@ function InboxContent() {
                       </div>
                     ) : (
                       <p className="text-gray-500 italic">(No content)</p>
+                    )}
+
+                    {/* Attachments Section */}
+                    {selectedMessage.metadata?.attachments && selectedMessage.metadata.attachments.length > 0 && (
+                      <div className="mt-6 border-t pt-4">
+                        <h3 className="font-semibold text-gray-900 mb-3 flex items-center">
+                          <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
+                          </svg>
+                          Attachments ({selectedMessage.metadata.attachments.length})
+                        </h3>
+                        <div className="space-y-2">
+                          {selectedMessage.metadata.attachments.map((attachment, index) => (
+                            <div key={index} className="flex items-center justify-between p-3 bg-gray-50 rounded border">
+                              <div className="flex items-center gap-3">
+                                <svg className="w-6 h-6 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+                                </svg>
+                                <div>
+                                  <p className="text-sm font-medium text-gray-900">{attachment.filename}</p>
+                                  <p className="text-xs text-gray-500">
+                                    {attachment.content_type} • {formatFileSize(attachment.size)}
+                                  </p>
+                                </div>
+                              </div>
+                              {attachment.url && (
+                                <a
+                                  href={attachment.url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="px-3 py-1 bg-blue-600 text-white text-sm rounded hover:bg-blue-700"
+                                >
+                                  Download
+                                </a>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
                     )}
                   </div>
                 </div>
