@@ -7,10 +7,14 @@ import { useRouter } from 'next/navigation';
 export default function SettingsPage() {
   const [user, setUser] = useState<any>(null);
   const [displayName, setDisplayName] = useState('');
+  const [webhookSecret, setWebhookSecret] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [savingWebhook, setSavingWebhook] = useState(false);
   const [message, setMessage] = useState('');
+  const [webhookMessage, setWebhookMessage] = useState('');
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [integrationStatus, setIntegrationStatus] = useState<any>(null);
   const router = useRouter();
   const supabase = createClient();
 
@@ -32,6 +36,18 @@ export default function SettingsPage() {
       if (profile) {
         setUser(profile);
         setDisplayName(profile.display_name || '');
+      }
+
+      // Fetch integration status
+      const statusResponse = await fetch('/api/onboarding', {
+        headers: {
+          'Authorization': `Bearer ${session.access_token}`,
+        },
+      });
+
+      if (statusResponse.ok) {
+        const statusData = await statusResponse.json();
+        setIntegrationStatus(statusData);
       }
 
       setLoading(false);
@@ -73,6 +89,55 @@ export default function SettingsPage() {
 
   const handleReconfigureIntegration = () => {
     router.push('/onboarding');
+  };
+
+  const handleUpdateWebhookSecret = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSavingWebhook(true);
+    setWebhookMessage('');
+
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return;
+
+      const response = await fetch('/api/onboarding', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({
+          step: 'store_signing_secret',
+          signing_secret: webhookSecret,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (response.ok) {
+        setWebhookMessage('✅ Webhook secret updated successfully!');
+        setWebhookSecret('');
+        
+        // Refresh integration status
+        const statusResponse = await fetch('/api/onboarding', {
+          headers: {
+            'Authorization': `Bearer ${session.access_token}`,
+          },
+        });
+        if (statusResponse.ok) {
+          const statusData = await statusResponse.json();
+          setIntegrationStatus(statusData);
+        }
+        
+        setTimeout(() => setWebhookMessage(''), 5000);
+      } else {
+        setWebhookMessage(`❌ ${data.error || 'Failed to update webhook secret'}`);
+      }
+    } catch (error) {
+      setWebhookMessage(`❌ Error: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    } finally {
+      setSavingWebhook(false);
+    }
   };
 
   const handleDeleteAccount = async () => {
@@ -170,16 +235,88 @@ export default function SettingsPage() {
         <div className="bg-white rounded-lg shadow p-6 mb-6">
           <h2 className="text-xl font-bold text-gray-900 mb-4">Resend Integration</h2>
           
-          <p className="text-gray-600 mb-4">
-            Reconfigure your Resend API key and webhook settings
-          </p>
+          <div className="mb-6 p-4 bg-gray-50 rounded-lg">
+            <h3 className="font-semibold text-gray-800 mb-2">Current Status</h3>
+            <div className="space-y-1 text-sm">
+              <p className="text-gray-600">
+                API Key: <span className={integrationStatus?.hasApiKey ? 'text-green-600' : 'text-red-600'}>
+                  {integrationStatus?.hasApiKey ? '✓ Configured' : '✗ Not configured'}
+                </span>
+              </p>
+              <p className="text-gray-600">
+                Webhook: <span className={integrationStatus?.webhookActive ? 'text-green-600' : 'text-red-600'}>
+                  {integrationStatus?.webhookActive ? '✓ Active' : '✗ Inactive'}
+                </span>
+              </p>
+              {integrationStatus?.webhookUrl && (
+                <p className="text-gray-600 mt-2">
+                  <span className="font-medium">Webhook URL:</span>
+                  <br />
+                  <code className="text-xs bg-gray-100 px-2 py-1 rounded mt-1 inline-block break-all">
+                    {integrationStatus.webhookUrl}
+                  </code>
+                </p>
+              )}
+            </div>
+          </div>
 
-          <button
-            onClick={handleReconfigureIntegration}
-            className="w-full bg-green-600 text-white py-2 px-4 rounded-lg hover:bg-green-700 transition-colors"
-          >
-            Reconfigure Integration
-          </button>
+          <div className="space-y-4">
+            <div>
+              <h3 className="font-semibold text-gray-800 mb-2">Update Webhook Secret</h3>
+              <p className="text-sm text-gray-600 mb-3">
+                Update your webhook signing secret without going through the full onboarding again.
+              </p>
+              
+              {webhookMessage && (
+                <div className={`mb-3 p-3 rounded-lg text-sm ${
+                  webhookMessage.startsWith('✅') 
+                    ? 'bg-green-50 border border-green-200 text-green-700' 
+                    : 'bg-red-50 border border-red-200 text-red-700'
+                }`}>
+                  {webhookMessage}
+                </div>
+              )}
+
+              <form onSubmit={handleUpdateWebhookSecret}>
+                <div className="mb-3">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Webhook Signing Secret
+                  </label>
+                  <input
+                    type="text"
+                    value={webhookSecret}
+                    onChange={(e) => setWebhookSecret(e.target.value)}
+                    placeholder="whsec_..."
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  />
+                  <p className="mt-1 text-xs text-gray-500">
+                    Get this from your Resend dashboard webhook settings
+                  </p>
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={savingWebhook || !webhookSecret}
+                  className="w-full bg-blue-600 text-white py-2 px-4 rounded-lg hover:bg-blue-700 disabled:bg-gray-400 transition-colors"
+                >
+                  {savingWebhook ? 'Updating...' : 'Update Webhook Secret'}
+                </button>
+              </form>
+            </div>
+
+            <div className="pt-4 border-t">
+              <h3 className="font-semibold text-gray-800 mb-2">Full Reconfiguration</h3>
+              <p className="text-sm text-gray-600 mb-3">
+                Need to change your API key or start over? This will take you through the complete setup again.
+              </p>
+              <button
+                onClick={handleReconfigureIntegration}
+                className="w-full bg-green-600 text-white py-2 px-4 rounded-lg hover:bg-green-700 transition-colors"
+              >
+                Reconfigure Integration
+              </button>
+            </div>
+          </div>
         </div>
 
         {/* Danger Zone */}

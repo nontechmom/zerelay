@@ -7,6 +7,93 @@ import { getSupabaseServiceClient } from '../../../_lib/supabase';
 const TIMESTAMP_TOLERANCE_SEC = 300;
 
 /**
+ * Process webhook events and store relevant data
+ */
+async function processWebhookEvent(
+  eventType: string,
+  eventData: any,
+  userId: string,
+  workspaceId?: string
+) {
+  const supabase = getSupabaseServiceClient();
+
+  try {
+    // Handle inbound email events
+    if (eventType === 'email.received' || eventType === 'email.delivered_to_inbox') {
+      const toEmail = eventData.to || eventData.to_email;
+      const fromEmail = eventData.from || eventData.from_email;
+      const subject = eventData.subject;
+      const htmlBody = eventData.html || eventData.html_body;
+      const textBody = eventData.text || eventData.text_body;
+      const resendEmailId = eventData.email_id || eventData.id;
+
+      if (toEmail) {
+        // Find matching mailbox
+        const { data: mailbox } = await supabase
+          .from('mailboxes')
+          .select('id, user_id, workspace_id')
+          .eq('email_address', toEmail.toLowerCase())
+          .eq('is_active', true)
+          .maybeSingle();
+
+        // Store in inbox
+        await supabase.from('inbox_messages').insert({
+          user_id: mailbox?.user_id || userId,
+          workspace_id: mailbox?.workspace_id || workspaceId || null,
+          mailbox_id: mailbox?.id || null,
+          resend_email_id: resendEmailId,
+          from_email: fromEmail,
+          from_name: eventData.from_name || null,
+          to_email: toEmail,
+          subject: subject || null,
+          html_body: htmlBody || null,
+          text_body: textBody || null,
+          event_type: eventType,
+          metadata: eventData,
+          is_read: false,
+          received_at: eventData.created_at || new Date().toISOString(),
+        });
+
+        console.log(`Stored inbox message for ${toEmail} (mailbox: ${mailbox?.id || 'none'})`);
+      }
+    }
+
+    // Handle bounces and other email events
+    if (eventType.startsWith('email.')) {
+      const toEmail = eventData.to || eventData.to_email;
+      
+      if (toEmail && (eventType === 'email.bounced' || eventType === 'email.complained')) {
+        // Store bounce/complaint in inbox for visibility
+        const { data: mailbox } = await supabase
+          .from('mailboxes')
+          .select('id, user_id, workspace_id')
+          .eq('email_address', toEmail.toLowerCase())
+          .eq('is_active', true)
+          .maybeSingle();
+
+        await supabase.from('inbox_messages').insert({
+          user_id: mailbox?.user_id || userId,
+          workspace_id: mailbox?.workspace_id || workspaceId || null,
+          mailbox_id: mailbox?.id || null,
+          resend_email_id: eventData.email_id || eventData.id,
+          from_email: 'system@zerelay.com',
+          from_name: 'ZeRelay System',
+          to_email: toEmail,
+          subject: `Email ${eventType.split('.')[1]} notification`,
+          text_body: `Your email to ${toEmail} ${eventType.split('.')[1]}. Reason: ${eventData.reason || 'Unknown'}`,
+          event_type: eventType,
+          metadata: eventData,
+          is_read: false,
+          received_at: eventData.created_at || new Date().toISOString(),
+        });
+      }
+    }
+  } catch (error) {
+    console.error('Error in processWebhookEvent:', error);
+  }
+}
+
+/**
  * Verify Resend/Svix webhook signature.
  *
  * Resend webhooks include three headers:
@@ -170,11 +257,10 @@ export async function handleResendWebhook(req: NextRequest, token?: string) {
       p_user_agent: null,
     });
 
-    // TODO: Process webhook event based on type
-    // - Store in inbound_messages table
-    // - Create/update conversations
-    // - Emit realtime updates
-    // - Send push notifications
+    // Process webhook event based on type
+    if (event.type && event.data && userId) {
+      await processWebhookEvent(event.type, event.data, userId, workspaceId);
+    }
   } catch (error) {
     console.error('Error processing webhook:', error);
   }
