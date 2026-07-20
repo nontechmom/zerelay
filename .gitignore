@@ -43,3 +43,16 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# ZeRelay Confidential Files
+*.txt
+!requirements.txt
+!README.txt
+web-backend/.env.local
+web-backend/test_*.ps1
+web-backend/webhook_*.txt
+web-backend/user_*.txt
+web-backend/*_token.txt
+*.md
+!README.md
+!web-backend/README.md
