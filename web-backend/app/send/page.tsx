@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { useRouter } from 'next/navigation';
 
@@ -11,8 +11,39 @@ export default function SendEmailPage() {
   const [html, setHtml] = useState('');
   const [sending, setSending] = useState(false);
   const [message, setMessage] = useState('');
+  const [mailboxes, setMailboxes] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
   const router = useRouter();
   const supabase = createClient();
+
+  useEffect(() => {
+    const fetchMailboxes = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        router.push('/login');
+        return;
+      }
+
+      // Fetch user's mailboxes
+      const { data: userMailboxes } = await supabase
+        .from('mailboxes')
+        .select('id, email_address, display_name, is_active')
+        .eq('user_id', session.user.id)
+        .eq('is_active', true)
+        .order('created_at', { ascending: true });
+
+      setMailboxes(userMailboxes || []);
+      
+      // If mailboxes exist, set the first one as default
+      if (userMailboxes && userMailboxes.length > 0) {
+        setFrom(userMailboxes[0].email_address);
+      }
+      
+      setLoading(false);
+    };
+
+    fetchMailboxes();
+  }, []);
 
   const handleSend = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -62,6 +93,14 @@ export default function SendEmailPage() {
     router.push('/dashboard');
   };
 
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <div className="text-gray-600">Loading...</div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
@@ -97,16 +136,42 @@ export default function SendEmailPage() {
               <label className="block text-sm font-medium text-gray-700 mb-2">
                 From <span className="text-red-500">*</span>
               </label>
-              <input
-                type="email"
-                value={from}
-                onChange={(e) => setFrom(e.target.value)}
-                required
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              />
-              <p className="mt-1 text-sm text-gray-500">
-                Use onboarding@resend.dev or your verified domain
-              </p>
+              {mailboxes.length > 0 ? (
+                <select
+                  value={from}
+                  onChange={(e) => setFrom(e.target.value)}
+                  required
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                >
+                  {mailboxes.map((mailbox) => (
+                    <option key={mailbox.id} value={mailbox.email_address}>
+                      {mailbox.email_address}
+                      {mailbox.display_name && ` (${mailbox.display_name})`}
+                    </option>
+                  ))}
+                  <option value="onboarding@resend.dev">
+                    onboarding@resend.dev (Fallback)
+                  </option>
+                </select>
+              ) : (
+                <>
+                  <input
+                    type="email"
+                    value={from}
+                    onChange={(e) => setFrom(e.target.value)}
+                    required
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  />
+                  <p className="mt-1 text-sm text-gray-500">
+                    Using onboarding@resend.dev. Add a verified domain and create a mailbox to send from your own email.
+                  </p>
+                </>
+              )}
+              {mailboxes.length > 0 && (
+                <p className="mt-1 text-sm text-gray-500">
+                  Select from your configured mailboxes
+                </p>
+              )}
             </div>
 
             <div className="mb-4">

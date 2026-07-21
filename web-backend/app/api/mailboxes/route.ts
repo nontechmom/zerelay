@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
+import { createClient as createServiceClient } from '@supabase/supabase-js';
 
 // GET /api/mailboxes - List all mailboxes for the user
 export async function GET(request: NextRequest) {
@@ -11,14 +12,31 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
+    // Check if user is admin
+    const { data: userProfile } = await supabase
+      .from('users')
+      .select('role')
+      .eq('id', user.id)
+      .single();
+
+    const isAdmin = userProfile?.role === 'admin';
+
+    // If admin, use service role to bypass RLS and see all mailboxes
+    let queryClient = supabase;
+    if (isAdmin) {
+      queryClient = createServiceClient(
+        process.env.NEXT_PUBLIC_SUPABASE_URL!,
+        process.env.SUPABASE_SERVICE_ROLE_KEY!
+      );
+    }
+
     // Fetch mailboxes with domain info
-    const { data: mailboxes, error } = await supabase
+    const { data: mailboxes, error } = await queryClient
       .from('mailboxes')
       .select(`
         *,
         domain:domains(id, domain_name, status)
       `)
-      .eq('user_id', user.id)
       .order('created_at', { ascending: false });
 
     if (error) {
@@ -26,7 +44,10 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Failed to fetch mailboxes' }, { status: 500 });
     }
 
-    return NextResponse.json({ mailboxes: mailboxes || [] });
+    return NextResponse.json({ 
+      mailboxes: mailboxes || [],
+      isAdmin 
+    });
   } catch (error) {
     console.error('Error in GET /api/mailboxes:', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });

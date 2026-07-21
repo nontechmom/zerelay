@@ -10,6 +10,14 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [sendingEmail, setSendingEmail] = useState(false);
   const [emailMessage, setEmailMessage] = useState('');
+  const [inboxStats, setInboxStats] = useState({
+    unreadCount: 0,
+    totalMessages: 0,
+    todayCount: 0,
+  });
+  const [recentMessages, setRecentMessages] = useState<any[]>([]);
+  const [recentWebhooks, setRecentWebhooks] = useState<any[]>([]);
+  const [mailboxes, setMailboxes] = useState<any[]>([]);
   const router = useRouter();
   const supabase = createClient();
 
@@ -41,6 +49,15 @@ export default function DashboardPage() {
         return;
       }
 
+      // Determine sender: use first available mailbox or fallback to onboarding@resend.dev
+      let fromEmail = 'onboarding@resend.dev';
+      let fromNote = 'Note: This email is sent from onboarding@resend.dev. Add a verified domain and create a mailbox to send from your own email address.';
+      
+      if (mailboxes.length > 0) {
+        fromEmail = mailboxes[0].email_address;
+        fromNote = `Sent from your mailbox: ${fromEmail}`;
+      }
+
       const response = await fetch('/api/resend/send', {
         method: 'POST',
         headers: {
@@ -48,7 +65,7 @@ export default function DashboardPage() {
           'Authorization': `Bearer ${session.access_token}`,
         },
         body: JSON.stringify({
-          from: 'onboarding@resend.dev',
+          from: fromEmail,
           to: user?.email || 'test@example.com',
           subject: 'Test Email from ZeRelay Dashboard',
           html: `
@@ -57,7 +74,7 @@ export default function DashboardPage() {
             <p>If you're receiving this, your integration is working perfectly! 🎉</p>
             <hr>
             <p style="color: #666; font-size: 12px;">Sent at: ${new Date().toLocaleString()}</p>
-            <p style="color: #999; font-size: 11px;">Note: This email is sent from onboarding@resend.dev. After adding your verified domain in Resend, you can send from your own domain.</p>
+            <p style="color: #999; font-size: 11px;">${fromNote}</p>
           `,
         }),
       });
@@ -65,7 +82,7 @@ export default function DashboardPage() {
       const data = await response.json();
 
       if (response.ok) {
-        setEmailMessage(`✅ Test email sent successfully! Email ID: ${data.id || 'N/A'}`);
+        setEmailMessage(`✅ Test email sent successfully from ${fromEmail}! Email ID: ${data.id || 'N/A'}`);
       } else {
         setEmailMessage(`❌ Failed to send: ${data.error || 'Unknown error'}`);
       }
@@ -105,6 +122,64 @@ export default function DashboardPage() {
           return;
         }
       }
+
+      // Fetch inbox statistics
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      
+      const { count: unreadCount } = await supabase
+        .from('inbox_messages')
+        .select('*', { count: 'exact', head: true })
+        .eq('user_id', session.user.id)
+        .eq('is_read', false);
+
+      const { count: totalMessages } = await supabase
+        .from('inbox_messages')
+        .select('*', { count: 'exact', head: true })
+        .eq('user_id', session.user.id);
+
+      const { count: todayCount } = await supabase
+        .from('inbox_messages')
+        .select('*', { count: 'exact', head: true })
+        .eq('user_id', session.user.id)
+        .gte('received_at', today.toISOString());
+
+      setInboxStats({
+        unreadCount: unreadCount || 0,
+        totalMessages: totalMessages || 0,
+        todayCount: todayCount || 0,
+      });
+
+      // Fetch recent inbox messages
+      const { data: messages } = await supabase
+        .from('inbox_messages')
+        .select('id, from_email, subject, received_at, is_read')
+        .eq('user_id', session.user.id)
+        .order('received_at', { ascending: false })
+        .limit(5);
+
+      setRecentMessages(messages || []);
+
+      // Fetch recent webhook events
+      const { data: webhooks } = await supabase
+        .from('audit_logs')
+        .select('id, metadata, created_at')
+        .eq('user_id', session.user.id)
+        .eq('action', 'webhook.received')
+        .order('created_at', { ascending: false })
+        .limit(5);
+
+      setRecentWebhooks(webhooks || []);
+
+      // Fetch user's mailboxes
+      const { data: userMailboxes } = await supabase
+        .from('mailboxes')
+        .select('id, email_address, display_name, is_active')
+        .eq('user_id', session.user.id)
+        .eq('is_active', true)
+        .order('created_at', { ascending: true });
+
+      setMailboxes(userMailboxes || []);
 
       setLoading(false);
     };

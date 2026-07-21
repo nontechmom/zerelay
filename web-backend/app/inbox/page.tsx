@@ -47,6 +47,7 @@ function InboxContent() {
   const [unreadCount, setUnreadCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<'all' | 'unread' | 'read'>('all');
+  const [isAdmin, setIsAdmin] = useState(false);
   const router = useRouter();
   const searchParams = useSearchParams();
   const supabase = createClient();
@@ -69,8 +70,14 @@ function InboxContent() {
     const mailboxId = searchParams.get('mailbox_id');
     const params = new URLSearchParams();
     
-    if (mailboxId) params.append('mailbox_id', mailboxId);
-    if (filter !== 'all') params.append('is_read', filter === 'read' ? 'true' : 'false');
+    // Only filter by mailbox if explicitly provided
+    if (mailboxId) {
+      params.append('mailbox_id', mailboxId);
+    }
+    
+    if (filter !== 'all') {
+      params.append('is_read', filter === 'read' ? 'true' : 'false');
+    }
 
     const response = await fetch(`/api/inbox?${params.toString()}`, {
       headers: {
@@ -82,6 +89,7 @@ function InboxContent() {
       const data = await response.json();
       setMessages(data.messages);
       setUnreadCount(data.unreadCount);
+      setIsAdmin(data.isAdmin || false);
     }
 
     setLoading(false);
@@ -132,7 +140,14 @@ function InboxContent() {
       };
     };
 
-    setupRealtimeSubscription();
+    const cleanup = setupRealtimeSubscription();
+    
+    // Cleanup function
+    return () => {
+      cleanup.then((cleanupFn) => {
+        if (cleanupFn) cleanupFn();
+      });
+    };
   }, [filter]);
 
   const handleMarkAsRead = async (messageId: string, currentReadState: boolean) => {
@@ -218,6 +233,11 @@ function InboxContent() {
               ← Back
             </button>
             <h1 className="text-2xl font-bold text-gray-900">Inbox</h1>
+            {isAdmin && (
+              <span className="ml-3 px-3 py-1 bg-purple-600 text-white text-sm font-semibold rounded-full">
+                👑 Admin View
+              </span>
+            )}
             {unreadCount > 0 && (
               <span className="ml-3 px-3 py-1 bg-red-600 text-white text-sm font-semibold rounded-full">
                 {unreadCount} unread

@@ -34,6 +34,7 @@ function MailboxesContent() {
   const [localPart, setLocalPart] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [message, setMessage] = useState('');
+  const [isAdmin, setIsAdmin] = useState(false);
   const router = useRouter();
   const searchParams = useSearchParams();
   const supabase = createClient();
@@ -55,6 +56,7 @@ function MailboxesContent() {
     if (mailboxResponse.ok) {
       const data = await mailboxResponse.json();
       setMailboxes(data.mailboxes);
+      setIsAdmin(data.isAdmin || false);
     }
 
     // Fetch domains
@@ -197,6 +199,11 @@ function MailboxesContent() {
               ← Back
             </button>
             <h1 className="text-2xl font-bold text-gray-900">Mailbox Management</h1>
+            {isAdmin && (
+              <span className="ml-3 px-3 py-1 bg-purple-600 text-white text-sm font-semibold rounded-full">
+                👑 Admin View
+              </span>
+            )}
           </div>
           <button
             onClick={() => setShowAddForm(!showAddForm)}
@@ -359,6 +366,12 @@ function MailboxesContent() {
                     className="px-4 py-2 bg-blue-600 text-white text-sm rounded hover:bg-blue-700"
                   >
                     View Inbox
+                  </button>
+                  <button
+                    onClick={() => router.push(`/mailboxes/${mailbox.id}/users`)}
+                    className="px-4 py-2 bg-purple-600 text-white text-sm rounded hover:bg-purple-700"
+                  >
+                    👥 Manage Users
                   </button>
                   <button
                     onClick={() => handleToggleActive(mailbox.id, mailbox.is_active)}

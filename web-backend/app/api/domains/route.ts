@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
+import { createClient as createServiceClient } from '@supabase/supabase-js';
 
 // GET /api/domains - List all domains for the user
 export async function GET(request: NextRequest) {
@@ -11,11 +12,28 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
+    // Check if user is admin
+    const { data: userProfile } = await supabase
+      .from('users')
+      .select('role')
+      .eq('id', user.id)
+      .single();
+
+    const isAdmin = userProfile?.role === 'admin';
+
+    // If admin, use service role to see all domains
+    let queryClient = supabase;
+    if (isAdmin) {
+      queryClient = createServiceClient(
+        process.env.NEXT_PUBLIC_SUPABASE_URL!,
+        process.env.SUPABASE_SERVICE_ROLE_KEY!
+      );
+    }
+
     // Fetch domains
-    const { data: domains, error } = await supabase
+    const { data: domains, error } = await queryClient
       .from('domains')
       .select('*')
-      .eq('user_id', user.id)
       .order('created_at', { ascending: false });
 
     if (error) {
@@ -23,7 +41,10 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Failed to fetch domains' }, { status: 500 });
     }
 
-    return NextResponse.json({ domains: domains || [] });
+    return NextResponse.json({ 
+      domains: domains || [],
+      isAdmin 
+    });
   } catch (error) {
     console.error('Error in GET /api/domains:', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
